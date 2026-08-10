@@ -114,9 +114,17 @@ target("llaisys")
         print("Copying llaisys to python/llaisys/libllaisys/ ..")
         if is_plat("windows") then
             os.cp("bin/*.dll", "python/llaisys/libllaisys/")
+            for _, dir in ipairs(os.dirs(".venv/Lib/site-packages/llaisys/libllaisys")) do
+                print("Copying llaisys to " .. dir .. " ..")
+                os.cp("bin/*.dll", dir)
+            end
         end
         if is_plat("linux") then
             os.cp("lib/*.so", "python/llaisys/libllaisys/")
+            for _, dir in ipairs(os.dirs(".venv/lib/python*/site-packages/llaisys/libllaisys")) do
+                print("Copying llaisys to " .. dir .. " ..")
+                os.cp("lib/*.so", dir)
+            end
         end
     end)
 target_end()
