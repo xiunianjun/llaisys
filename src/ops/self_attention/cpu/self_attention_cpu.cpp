@@ -9,15 +9,15 @@
 template <typename T>
 void self_attention_(T *attn_val, const T *q, const T *k, const T *v, size_t q_len, size_t kv_len, size_t n_heads,
                      size_t n_kv_heads, size_t head_dim, size_t value_dim, float scale) {
-    std::vector<float> A(n_heads * q_len * kv_len);
+    std::vector<float> scores(kv_len);
 
-    // calculate A = QK^T * scale, with causal mask
     for (size_t h = 0; h < n_heads; h++) {
         size_t kv_h = h / (n_heads / n_kv_heads);
         for (size_t i = 0; i < q_len; i++) {
+            // calculate one row of A = QK^T * scale, with causal mask
             for (size_t j = 0; j < kv_len; j++) {
                 if (j > i + kv_len - q_len) {
-                    A[(h * q_len + i) * kv_len + j] = -std::numeric_limits<float>::infinity();
+                    scores[j] = -std::numeric_limits<float>::infinity();
                     continue;
                 }
 
@@ -26,40 +26,30 @@ void self_attention_(T *attn_val, const T *q, const T *k, const T *v, size_t q_l
                     score += llaisys::utils::cast<float>(q[(i * n_heads + h) * head_dim + x])
                              * llaisys::utils::cast<float>(k[(j * n_kv_heads + kv_h) * head_dim + x]);
                 }
-                A[(h * q_len + i) * kv_len + j] = score * scale;
+                scores[j] = score * scale;
             }
-        }
-    }
 
-    // calculate softmax(A) along kv_len
-    for (size_t h = 0; h < n_heads; h++) {
-        for (size_t i = 0; i < q_len; i++) {
+            // calculate softmax(scores) along kv_len
             float max_score = -std::numeric_limits<float>::infinity();
             for (size_t j = 0; j < kv_len; j++) {
-                max_score = std::max(max_score, A[(h * q_len + i) * kv_len + j]);
+                max_score = std::max(max_score, scores[j]);
             }
 
             float denominator = 0.0f;
             for (size_t j = 0; j < kv_len; j++) {
-                A[(h * q_len + i) * kv_len + j] = std::exp(A[(h * q_len + i) * kv_len + j] - max_score);
-                denominator += A[(h * q_len + i) * kv_len + j];
+                scores[j] = std::exp(scores[j] - max_score);
+                denominator += scores[j];
             }
 
             for (size_t j = 0; j < kv_len; j++) {
-                A[(h * q_len + i) * kv_len + j] /= denominator;
+                scores[j] /= denominator;
             }
-        }
-    }
 
-    // calculate result = softmax(A) V
-    for (size_t h = 0; h < n_heads; h++) {
-        size_t kv_h = h / (n_heads / n_kv_heads);
-        for (size_t i = 0; i < q_len; i++) {
+            // calculate result = softmax(scores) V
             for (size_t y = 0; y < value_dim; y++) {
                 float score = 0.0f;
                 for (size_t j = 0; j < kv_len; j++) {
-                    score += A[(h * q_len + i) * kv_len + j]
-                             * llaisys::utils::cast<float>(v[(j * n_kv_heads + kv_h) * value_dim + y]);
+                    score += scores[j] * llaisys::utils::cast<float>(v[(j * n_kv_heads + kv_h) * value_dim + y]);
                 }
                 attn_val[(i * n_heads + h) * value_dim + y] = llaisys::utils::cast<T>(score);
             }
