@@ -2,6 +2,7 @@
 
 #include "../../tensor/tensor.hpp"
 
+// c, a, b: same shape, elementwise add.
 namespace llaisys::ops {
 void add(tensor_t c, tensor_t a, tensor_t b);
 }
