@@ -12,6 +12,7 @@
 #include "../ops/swiglu/op.hpp"
 
 #include "../core/llaisys_core.hpp"
+#include "../utils.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -21,6 +22,10 @@
 struct LlaisysQwen2Model {
     LlaisysQwen2Meta meta{};
     LlaisysQwen2Weights weights{};
+    llaisysTensor_t *k_cache{};
+    llaisysTensor_t *v_cache{};
+    size_t cached_len{};
+    size_t cache_capacity{};
     llaisysDeviceType_t device{};
     std::vector<int> device_ids;
 };
@@ -60,6 +65,33 @@ void destroyTensorArray(llaisysTensor_t *&tensors, size_t count) {
 
 llaisysTensor_t *createTensorArray(size_t count) {
     return new llaisysTensor_t[count]{};
+}
+
+void copyTensor(llaisys::tensor_t dst, llaisys::tensor_t src) {
+    CHECK_SAME_SHAPE(dst->shape(), src->shape());
+    CHECK_ARGUMENT(dst->dtype() == src->dtype(), "copyTensor: dtype mismatch");
+    ASSERT(dst->isContiguous() && src->isContiguous(), "copyTensor: tensors must be contiguous.");
+
+    llaisysMemcpyKind_t kind;
+    if (src->deviceType() == LLAISYS_DEVICE_CPU && dst->deviceType() == LLAISYS_DEVICE_CPU) {
+        kind = LLAISYS_MEMCPY_H2H;
+        llaisys::core::context().setDevice(LLAISYS_DEVICE_CPU, 0);
+    } else if (src->deviceType() == LLAISYS_DEVICE_CPU) {
+        kind = LLAISYS_MEMCPY_H2D;
+        llaisys::core::context().setDevice(dst->deviceType(), dst->deviceId());
+    } else if (dst->deviceType() == LLAISYS_DEVICE_CPU) {
+        kind = LLAISYS_MEMCPY_D2H;
+        llaisys::core::context().setDevice(src->deviceType(), src->deviceId());
+    } else {
+        kind = LLAISYS_MEMCPY_D2D;
+        llaisys::core::context().setDevice(dst->deviceType(), dst->deviceId());
+    }
+
+    llaisys::core::context().runtime().api()->memcpy_sync(
+        dst->data(),
+        src->data(),
+        src->numel() * src->elementSize(),
+        kind);
 }
 
 void createWeightTensors(LlaisysQwen2Model *model) {
@@ -102,6 +134,18 @@ void createWeightTensors(LlaisysQwen2Model *model) {
     }
 }
 
+void createCacheTensors(LlaisysQwen2Model *model) {
+    auto &meta = model->meta;
+    int device_id = model->device_ids.empty() ? 0 : model->device_ids[0];
+
+    model->k_cache = createTensorArray(meta.nlayer);
+    model->v_cache = createTensorArray(meta.nlayer);
+    for (size_t i = 0; i < meta.nlayer; ++i) {
+        model->k_cache[i] = createTensor({model->cache_capacity, meta.nkvh, meta.dh}, meta.dtype, model->device, device_id);
+        model->v_cache[i] = createTensor({model->cache_capacity, meta.nkvh, meta.dh}, meta.dtype, model->device, device_id);
+    }
+}
+
 void destroyWeights(LlaisysQwen2Weights &weights, size_t nlayer) {
     destroyTensor(weights.in_embed);
     destroyTensor(weights.out_embed);
@@ -119,6 +163,13 @@ void destroyWeights(LlaisysQwen2Weights &weights, size_t nlayer) {
     destroyTensorArray(weights.mlp_gate_w, nlayer);
     destroyTensorArray(weights.mlp_up_w, nlayer);
     destroyTensorArray(weights.mlp_down_w, nlayer);
+}
+
+void destroyCache(LlaisysQwen2Model *model) {
+    destroyTensorArray(model->k_cache, model->meta.nlayer);
+    destroyTensorArray(model->v_cache, model->meta.nlayer);
+    model->cached_len = 0;
+    model->cache_capacity = 0;
 }
 
 } // namespace
@@ -143,7 +194,9 @@ struct LlaisysQwen2Model *llaisysQwen2ModelCreate(
         model->device_ids.push_back(0);
     }
 
+    model->cache_capacity = std::min(model->meta.maxseq, size_t{4096});
     createWeightTensors(model);
+    createCacheTensors(model);
     return model;
 }
 
@@ -151,8 +204,16 @@ void llaisysQwen2ModelDestroy(struct LlaisysQwen2Model *model) {
     if (model == nullptr) {
         return;
     }
+    destroyCache(model);
     destroyWeights(model->weights, model->meta.nlayer);
     delete model;
+}
+
+void llaisysQwen2ModelReset(struct LlaisysQwen2Model *model) {
+    if (model == nullptr) {
+        return;
+    }
+    model->cached_len = 0;
 }
 
 struct LlaisysQwen2Weights *llaisysQwen2ModelWeights(struct LlaisysQwen2Model *model) {
@@ -173,6 +234,9 @@ int64_t llaisysQwen2ModelInfer(
     int device_id = model->device_ids.empty() ? 0 : model->device_ids[0];
     size_t q_dim = model->meta.nh * model->meta.dh;
     size_t kv_dim = model->meta.nkvh * model->meta.dh;
+    size_t old_cached_len = model->cached_len;
+    size_t new_cached_len = old_cached_len + ntoken;
+    CHECK_ARGUMENT(new_cached_len <= model->cache_capacity, "Qwen2 KV cache capacity exceeded.");
 
     llaisysTensor_t input_tokens_tensor = createTensor({ntoken}, LLAISYS_DTYPE_I64, model->device, device_id);
     input_tokens_tensor->tensor->load(token_ids);
@@ -181,7 +245,7 @@ int64_t llaisysQwen2ModelInfer(
     llaisysTensor_t position_ids_tensor = createTensor({ntoken}, LLAISYS_DTYPE_I64, model->device, device_id);
     std::vector<int64_t> position_ids(ntoken);
     for (size_t pos = 0; pos < ntoken; ++pos) {
-        position_ids[pos] = static_cast<int64_t>(pos);
+        position_ids[pos] = static_cast<int64_t>(old_cached_len + pos);
     }
     position_ids_tensor->tensor->load(position_ids.data());
 
@@ -224,10 +288,18 @@ int64_t llaisysQwen2ModelInfer(
         llaisys::ops::rope(q_rope->tensor, q_reshape, position_ids_tensor->tensor, model->meta.theta);
         llaisys::ops::rope(k_rope->tensor, k_reshape, position_ids_tensor->tensor, model->meta.theta);
 
+        auto k_cache_dst = model->k_cache[i]->tensor->slice(0, old_cached_len, new_cached_len);
+        auto v_cache_dst = model->v_cache[i]->tensor->slice(0, old_cached_len, new_cached_len);
+        copyTensor(k_cache_dst, k_rope->tensor);
+        copyTensor(v_cache_dst, v_reshape);
+
+        auto k_cache_total = model->k_cache[i]->tensor->slice(0, 0, new_cached_len);
+        auto v_cache_total = model->v_cache[i]->tensor->slice(0, 0, new_cached_len);
+
         // self attention
         llaisysTensor_t attention_vals_raw = createTensor({ntoken, model->meta.nh, model->meta.dh}, model->meta.dtype, model->device, device_id);
 
-        llaisys::ops::self_attention(attention_vals_raw->tensor, q_rope->tensor, k_rope->tensor, v_reshape, 1.0 / std::sqrt(model->meta.dh));
+        llaisys::ops::self_attention(attention_vals_raw->tensor, q_rope->tensor, k_cache_total, v_cache_total, 1.0 / std::sqrt(model->meta.dh));
 
         // reshape + linear
         llaisysTensor_t attention_vals = createTensor({ntoken, model->meta.hs}, model->meta.dtype, model->device, device_id);
@@ -275,6 +347,7 @@ int64_t llaisysQwen2ModelInfer(
         destroyTensor(up);
         destroyTensor(glu_tensor);
     }
+    model->cached_len = new_cached_len;
 
     // RNS NORM
     llaisysTensor_t final_hidden = createTensor(current_tensor->tensor->shape(), model->meta.dtype, model->device, device_id);
@@ -288,7 +361,7 @@ int64_t llaisysQwen2ModelInfer(
     // argmax
     llaisysTensor_t max_idx = createTensor({1}, LLAISYS_DTYPE_I64, model->device, device_id);
     llaisysTensor_t max_val = createTensor({1}, model->meta.dtype, model->device, device_id);
-    llaisys::ops::argmax(max_idx->tensor, max_val->tensor, logits->tensor->view({model->meta.voc}));
+    llaisys::ops::argmax(max_idx->tensor, max_val->tensor, logits->tensor->reshape({model->meta.voc}));
 
     int64_t res;
     llaisys::core::context().setDevice(max_idx->tensor->deviceType(), max_idx->tensor->deviceId());

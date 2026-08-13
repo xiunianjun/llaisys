@@ -250,6 +250,12 @@ tensor_t Tensor::view(const std::vector<size_t> &shape) const {
         new_dim_end = new_dim_begin;
     }
 
+    while (new_dim_end > 0 && shape[new_dim_end - 1] == 1) {
+        size_t dim = new_dim_end - 1;
+        strides[dim] = dim + 1 < shape.size() ? strides[dim + 1] * static_cast<ptrdiff_t>(shape[dim + 1]) : 1;
+        new_dim_end--;
+    }
+
     CHECK_ARGUMENT(new_dim_end == 0, "Tensor::view: shape is incompatible with current strides");
 
     new_meta.strides = strides;

@@ -48,6 +48,7 @@ def load_qwen2(lib):
     try:
         model_create = lib.llaisysQwen2ModelCreate
         model_destroy = lib.llaisysQwen2ModelDestroy
+        model_reset = lib.llaisysQwen2ModelReset
         model_weights = lib.llaisysQwen2ModelWeights
         model_infer = lib.llaisysQwen2ModelInfer
     except AttributeError:
@@ -63,6 +64,9 @@ def load_qwen2(lib):
 
     model_destroy.argtypes = [llaisysQwen2Model_t]
     model_destroy.restype = None
+
+    model_reset.argtypes = [llaisysQwen2Model_t]
+    model_reset.restype = None
 
     model_weights.argtypes = [llaisysQwen2Model_t]
     model_weights.restype = POINTER(LlaisysQwen2Weights)

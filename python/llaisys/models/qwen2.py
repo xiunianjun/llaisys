@@ -118,17 +118,23 @@ class Qwen2:
     ):
         output_tokens = list(inputs)
         steps = self._meta.maxseq if max_new_tokens is None else max_new_tokens
+        if steps <= 0 or not output_tokens:
+            return output_tokens
 
+        LIB_LLAISYS.llaisysQwen2ModelReset(self._model)
+
+        next_inputs = output_tokens
         for _ in range(steps):
-            token_ids = (c_int64 * len(output_tokens))(*output_tokens)
+            token_ids = (c_int64 * len(next_inputs))(*next_inputs)
             next_token = LIB_LLAISYS.llaisysQwen2ModelInfer(
                 self._model,
                 token_ids,
-                c_size_t(len(output_tokens)),
+                c_size_t(len(next_inputs)),
             )
             output_tokens.append(int(next_token))
 
             if next_token == self._meta.end_token:
                 break
+            next_inputs = [int(next_token)]
 
         return output_tokens
