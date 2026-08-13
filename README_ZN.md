@@ -292,19 +292,51 @@ python test/test_ops.py
 
 ## 作业 #3：大语言模型推理
 
-终于，是时候用LLAISYS实现文本生成了。
+终于，是时候用LLAISYS实现文本生成了。本作业的重点不是“调用一个已经写好的模型”，而是自己搭出一个最小可用的大语言模型推理流程：读取模型权重，执行Qwen2的前向计算，并在生成过程中逐步产生新的token。
 
-- 在`test/test_infer.py`中，你的实现应该能够使用argmax采样生成与PyTorch相同的文本。我们用于此作业的模型是[DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B)。
+我们用于此作业的模型是[DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B)。`test/test_infer.py`会先用Hugging Face / PyTorch运行同一个模型，得到参考输出；然后再调用你的LLAISYS实现。开启`--test`后，测试会使用argmax采样，并要求你的输出token序列与PyTorch结果一致。
 
-- 你的实现的python包装器在`python/llaisys/models/qwen2.py`中。你不允许在这里使用任何基于python的框架（如PyTorch）实现你的模型推理逻辑。相反，你需要在LLAISYS后端用C/C++实现模型。脚本加载safetensors文件中的每个张量，你需要从它们加载数据到你的模型后端。
+你需要完成的系统边界如下：
 
-- 在`include/llaisys/models/qwen2.h`中，为你定义了一个原型。你可以随意修改代码，但你应该至少提供模型创建、销毁、数据加载和推理的基本API。在`src/llaisys/`中实现你的C API，并像`src/`中的其他模块一样组织你的C++代码。记得在`xmake.lua`中定义编译过程。
+- Python层负责提供易用接口、加载safetensors文件、把权重交给后端，并发起生成请求。入口在`python/llaisys/models/qwen2.py`。
 
-- 在`python/llaisys/libllaisys/`中，为你的C API定义ctypes包装函数。使用你的包装函数实现`python/llaisys/models/qwen2.py`。
+- C API层负责连接Python和C++后端。接口原型在`include/llaisys/models/qwen2.h`中，你可以根据需要调整，但至少应该支持模型创建、销毁、权重加载和推理生成。
 
-- 你需要实现 KV-Cache 功能，否则模型推理速度会过慢。
+- C++后端负责真正的模型推理逻辑。你需要在`src/llaisys/`中实现C API，并像`src/`中的其他模块一样组织模型相关代码。不要在Python中使用PyTorch、Transformers或其他Python框架来完成模型计算。
 
-- 调试直到你的模型工作。利用张量的`debug`函数打印张量数据。它允许你在模型推理期间将任何张量的数据与PyTorch进行比较。
+- 编译系统需要知道你的新增文件。修改代码结构后，记得在`xmake.lua`或相关构建文件中加入对应编译规则。
+
+- ctypes包装层负责把C API暴露给Python。你需要在`python/llaisys/libllaisys/`中定义包装函数，并在`python/llaisys/models/qwen2.py`中调用它们。
+
+建议你把这个任务拆成几个阶段理解：
+
+1. 先读懂`test/test_infer.py`的调用路径，确认测试如何加载Hugging Face模型、如何调用`llaisys.models.Qwen2`、以及最终比较什么结果。
+
+2. 再读懂Qwen2一次前向传播需要哪些模块。前面作业实现的`embedding`、`linear`、`rms_norm`、`rope`、`self_attention`、`swiglu`、`argmax`等算子，都会在这里被组合起来。
+
+3. 然后设计模型对象需要保存哪些信息，例如模型配置、各层权重、临时张量，以及生成过程中会复用的状态。
+
+4. 接着实现权重加载流程。Python脚本会从safetensors文件中读出每个张量，你需要根据张量名称和形状，把它们加载到后端模型对象中。
+
+5. 最后实现生成流程。模型需要处理输入prompt，计算logits，选择下一个token，并把新token继续送入模型，直到达到最大生成步数。
+
+KV-Cache是本作业必须理解的一部分。自回归生成时，模型每次只新增一个token，但注意力层会反复用到之前token的Key和Value。如果每一步都从头重算整个序列，推理会非常慢。KV-Cache的作用就是在每一层保存已经计算过的Key和Value，让后续生成时可以复用它们。
+
+如果你不知道从哪个文件开始，可以先从后端API骨架入手。`include/llaisys/models/qwen2.h`里声明的是Python最终会调用到的C API；你可以在`src/llaisys/qwen2.cc`中实现这些函数。这个文件的职责是管理一个不透明的`LlaisysQwen2Model`句柄：创建模型对象、保存`LlaisysQwen2Meta`、准备`LlaisysQwen2Weights`中的权重槽位、在销毁时释放资源，并在`llaisysQwen2ModelInfer`中调用真正的前向计算。可以先让`Create`、`Destroy`、`Weights`三个接口跑通，再开始写完整推理。
+
+推荐的最小开发顺序是：
+
+1. 在`src/llaisys/qwen2.cc`中定义`struct LlaisysQwen2Model`，保存meta、设备信息和weights。
+
+2. 实现`llaisysQwen2ModelCreate`，先完成模型对象创建，再逐步为每个权重字段创建正确形状的`llaisysTensor_t`。
+
+3. 实现`llaisysQwen2ModelWeights`，让Python可以拿到权重表并把safetensors数据加载进去。
+
+4. 实现`llaisysQwen2ModelDestroy`，确保创建过的tensor和数组都会被释放。
+
+5. 最后实现`llaisysQwen2ModelInfer`。如果一开始不做KV-Cache，可以让它每次接收完整token序列，跑完整forward，取最后一个位置的logits做argmax并返回下一个token。
+
+调试时，不要一开始就只看最终生成文本。更可靠的方法是逐步比较中间结果：先确认权重是否加载正确，再确认单层或某个算子的输出是否接近PyTorch参考结果。张量的`debug`函数可以帮助你在模型推理期间打印数据，并与PyTorch侧结果对照。
 
 完成实现后，你可以运行以下命令来测试你的模型：
 
