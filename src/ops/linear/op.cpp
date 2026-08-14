@@ -39,6 +39,9 @@ void linear(tensor_t out, tensor_t in, tensor_t weight, tensor_t bias) {
     llaisys::core::context().setDevice(out->deviceType(), out->deviceId());
 
     switch (out->deviceType()) {
+    case LLAISYS_DEVICE_CPU:
+        return cpu::linear(out->data(), in->data(), weight->data(), bias ? bias->data() : nullptr, out->dtype(),
+                           out->shape()[0], out->shape()[1], in->shape()[1]);
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
         return nvidia::linear(out->data(), in->data(), weight->data(), bias ? bias->data() : nullptr, out->dtype(),

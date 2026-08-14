@@ -25,6 +25,8 @@ void rearrange(tensor_t out, tensor_t in) {
     llaisys::core::context().setDevice(out->deviceType(), out->deviceId());
 
     switch (out->deviceType()) {
+    case LLAISYS_DEVICE_CPU:
+        return cpu::rearrange(out->data(), in->data(), out->dtype(), out->numel());
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
         return nvidia::rearrange(out->data(), in->data(), out->dtype(), out->numel());

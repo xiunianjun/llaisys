@@ -27,6 +27,8 @@ void swiglu(tensor_t out, tensor_t gate, tensor_t up) {
     llaisys::core::context().setDevice(out->deviceType(), out->deviceId());
 
     switch (out->deviceType()) {
+    case LLAISYS_DEVICE_CPU:
+        return cpu::swiglu(out->data(), gate->data(), up->data(), out->dtype(), out->numel());
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
         return nvidia::swiglu(out->data(), gate->data(), up->data(), out->dtype(), out->numel());
