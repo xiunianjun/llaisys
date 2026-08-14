@@ -236,7 +236,9 @@ int64_t llaisysQwen2ModelInfer(
     size_t kv_dim = model->meta.nkvh * model->meta.dh;
     size_t old_cached_len = model->cached_len;
     size_t new_cached_len = old_cached_len + ntoken;
-    CHECK_ARGUMENT(new_cached_len <= model->cache_capacity, "Qwen2 KV cache capacity exceeded.");
+    if (new_cached_len > model->cache_capacity) {
+        return int64_t{-1};
+    }
 
     llaisysTensor_t input_tokens_tensor = createTensor({ntoken}, LLAISYS_DTYPE_I64, model->device, device_id);
     input_tokens_tensor->tensor->load(token_ids);
@@ -299,7 +301,8 @@ int64_t llaisysQwen2ModelInfer(
         // self attention
         llaisysTensor_t attention_vals_raw = createTensor({ntoken, model->meta.nh, model->meta.dh}, model->meta.dtype, model->device, device_id);
 
-        llaisys::ops::self_attention(attention_vals_raw->tensor, q_rope->tensor, k_cache_total, v_cache_total, 1.0 / std::sqrt(model->meta.dh));
+        const float attention_scale = 1.0f / std::sqrt(static_cast<float>(model->meta.dh));
+        llaisys::ops::self_attention(attention_vals_raw->tensor, q_rope->tensor, k_cache_total, v_cache_total, attention_scale);
 
         // reshape + linear
         llaisysTensor_t attention_vals = createTensor({ntoken, model->meta.hs}, model->meta.dtype, model->device, device_id);
