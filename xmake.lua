@@ -18,6 +18,24 @@ if has_config("nv-gpu") then
     includes("xmake/nvidia.lua")
 end
 
+-- Moore Threads MUSA --
+option("mt-gpu")
+    set_default(false)
+    set_showmenu(true)
+    set_description("Whether to compile implementations for Moore Threads MUSA GPU")
+option_end()
+
+option("musa")
+    set_default("")
+    set_showmenu(true)
+    set_description("MUSA SDK directory, e.g. /usr/local/musa")
+option_end()
+
+if has_config("mt-gpu") then
+    add_defines("ENABLE_MOORE_API")
+    includes("xmake/moore.lua")
+end
+
 target("llaisys-utils")
     set_kind("static")
 
@@ -39,6 +57,9 @@ target("llaisys-device")
     add_deps("llaisys-device-cpu")
     if has_config("nv-gpu") then
         add_deps("llaisys-device-nvidia")
+    end
+    if has_config("mt-gpu") then
+        add_deps("llaisys-device-moore")
     end
 
     set_languages("cxx17")
@@ -89,6 +110,9 @@ target("llaisys-ops")
     if has_config("nv-gpu") then
         add_deps("llaisys-ops-nvidia")
     end
+    if has_config("mt-gpu") then
+        add_deps("llaisys-ops-moore")
+    end
 
     set_languages("cxx17")
     set_warnings("all", "error")
@@ -105,7 +129,16 @@ target("llaisys")
     set_kind("shared")
     if has_config("nv-gpu") then
         add_rules("cuda")
-        add_links("cudart")
+        add_links("cudart", "cublas")
+    end
+    if has_config("mt-gpu") then
+        local musa_dir = get_config("musa")
+        if musa_dir == nil or musa_dir == "" then
+            musa_dir = os.getenv("MUSA_HOME") or "/usr/local/musa"
+        end
+        add_linkdirs(path.join(musa_dir, "lib"), path.join(musa_dir, "lib64"))
+        add_rpathdirs(path.join(musa_dir, "lib"), path.join(musa_dir, "lib64"))
+        add_links("musa", "mublas")
     end
     add_deps("llaisys-utils")
     add_deps("llaisys-device")

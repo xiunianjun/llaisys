@@ -7,6 +7,9 @@
 #ifdef ENABLE_NVIDIA_API
 #include "nvidia/rope_nvidia.hpp"
 #endif
+#ifdef ENABLE_MOORE_API
+#include "moore/rope_moore.hpp"
+#endif
 
 namespace llaisys::ops {
 void rope(tensor_t out, tensor_t in, tensor_t pos_ids, float theta) {
@@ -32,6 +35,11 @@ void rope(tensor_t out, tensor_t in, tensor_t pos_ids, float theta) {
     case LLAISYS_DEVICE_NVIDIA:
         return nvidia::rope(out->data(), in->data(), pos_ids->data(), out->dtype(), out->shape()[0], out->shape()[1],
                             out->shape()[2], theta);
+#endif
+#ifdef ENABLE_MOORE_API
+    case LLAISYS_DEVICE_MOORE:
+        return moore::rope(out->data(), in->data(), pos_ids->data(), out->dtype(), out->shape()[0], out->shape()[1],
+                           out->shape()[2], theta);
 #endif
     default:
         EXCEPTION_UNSUPPORTED_DEVICE;

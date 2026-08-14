@@ -7,6 +7,9 @@
 #ifdef ENABLE_NVIDIA_API
 #include "nvidia/rearrange_nvidia.hpp"
 #endif
+#ifdef ENABLE_MOORE_API
+#include "moore/rearrange_moore.hpp"
+#endif
 
 namespace llaisys::ops {
 void rearrange(tensor_t out, tensor_t in) {
@@ -25,6 +28,10 @@ void rearrange(tensor_t out, tensor_t in) {
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
         return nvidia::rearrange(out->data(), in->data(), out->dtype(), out->numel());
+#endif
+#ifdef ENABLE_MOORE_API
+    case LLAISYS_DEVICE_MOORE:
+        return moore::rearrange(out->data(), in->data(), out->dtype(), out->numel());
 #endif
     default:
         EXCEPTION_UNSUPPORTED_DEVICE;

@@ -1,17 +1,17 @@
-#include "rearrange_nvidia.hpp"
+#include "rearrange_moore.hpp"
 
 #include "../../../utils.hpp"
 
-#include <cuda_bf16.h>
-#include <cuda_fp16.h>
-#include <cuda_runtime.h>
+#include <musa_bf16.h>
+#include <musa_fp16.h>
+#include <musa_runtime.h>
 #include <iostream>
 #include <stdexcept>
 
 namespace {
-void checkCudaError(cudaError_t err, const char *api) {
-    if (err != cudaSuccess) {
-        std::cerr << "[ERROR] " << api << " failed: " << cudaGetErrorString(err) << std::endl;
+void checkCudaError(musaError_t err, const char *api) {
+    if (err != musaSuccess) {
+        std::cerr << "[ERROR] " << api << " failed: " << musaGetErrorString(err) << std::endl;
         throw std::runtime_error(api);
     }
 }
@@ -30,11 +30,11 @@ void launchRearrange(std::byte *out, const std::byte *in, size_t numel) {
     int grid_size = static_cast<int>((numel + block_size - 1) / block_size);
 
     rearrangeKernel<<<grid_size, block_size>>>(reinterpret_cast<T *>(out), reinterpret_cast<const T *>(in), numel);
-    checkCudaError(cudaGetLastError(), "rearrangeKernel");
+    checkCudaError(musaGetLastError(), "rearrangeKernel");
 }
 } // namespace
 
-namespace llaisys::ops::nvidia {
+namespace llaisys::ops::moore {
 void rearrange(std::byte *out, const std::byte *in, llaisysDataType_t type, size_t numel) {
     switch (type) {
     case LLAISYS_DTYPE_F32:
@@ -47,4 +47,4 @@ void rearrange(std::byte *out, const std::byte *in, llaisysDataType_t type, size
         EXCEPTION_UNSUPPORTED_DATATYPE(type);
     }
 }
-} // namespace llaisys::ops::nvidia
+} // namespace llaisys::ops::moore

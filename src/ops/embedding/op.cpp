@@ -7,6 +7,9 @@
 #ifdef ENABLE_NVIDIA_API
 #include "nvidia/embedding_nvidia.hpp"
 #endif
+#ifdef ENABLE_MOORE_API
+#include "moore/embedding_moore.hpp"
+#endif
 
 namespace llaisys::ops {
 void embedding(tensor_t out, tensor_t index, tensor_t weight) {
@@ -33,6 +36,11 @@ void embedding(tensor_t out, tensor_t index, tensor_t weight) {
     case LLAISYS_DEVICE_NVIDIA:
         return nvidia::embedding(out->data(), index->data(), weight->data(), index->numel(), weight->shape()[0],
                                  weight->shape()[1] * weight->elementSize());
+#endif
+#ifdef ENABLE_MOORE_API
+    case LLAISYS_DEVICE_MOORE:
+        return moore::embedding(out->data(), index->data(), weight->data(), index->numel(), weight->shape()[0],
+                                weight->shape()[1] * weight->elementSize());
 #endif
     default:
         EXCEPTION_UNSUPPORTED_DEVICE;

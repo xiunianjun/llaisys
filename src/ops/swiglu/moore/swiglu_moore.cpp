@@ -1,18 +1,18 @@
-#include "swiglu_nvidia.hpp"
+#include "swiglu_moore.hpp"
 
 #include "../../../utils.hpp"
 
-#include <cuda_bf16.h>
-#include <cuda_fp16.h>
-#include <cuda_runtime.h>
+#include <musa_bf16.h>
+#include <musa_fp16.h>
+#include <musa_runtime.h>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
 
 namespace {
-void checkCudaError(cudaError_t err, const char *api) {
-    if (err != cudaSuccess) {
-        std::cerr << "[ERROR] " << api << " failed: " << cudaGetErrorString(err) << std::endl;
+void checkCudaError(musaError_t err, const char *api) {
+    if (err != musaSuccess) {
+        std::cerr << "[ERROR] " << api << " failed: " << musaGetErrorString(err) << std::endl;
         throw std::runtime_error(api);
     }
 }
@@ -64,11 +64,11 @@ void launchSwiGLU(std::byte *out, const std::byte *gate, const std::byte *up, si
 
     swigluKernel<<<grid_size, block_size>>>(reinterpret_cast<T *>(out), reinterpret_cast<const T *>(gate),
                                             reinterpret_cast<const T *>(up), numel);
-    checkCudaError(cudaGetLastError(), "swigluKernel");
+    checkCudaError(musaGetLastError(), "swigluKernel");
 }
 } // namespace
 
-namespace llaisys::ops::nvidia {
+namespace llaisys::ops::moore {
 void swiglu(std::byte *out, const std::byte *gate, const std::byte *up, llaisysDataType_t type, size_t numel) {
     switch (type) {
     case LLAISYS_DTYPE_F32:
@@ -81,4 +81,4 @@ void swiglu(std::byte *out, const std::byte *gate, const std::byte *up, llaisysD
         EXCEPTION_UNSUPPORTED_DATATYPE(type);
     }
 }
-} // namespace llaisys::ops::nvidia
+} // namespace llaisys::ops::moore

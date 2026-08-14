@@ -1,0 +1,9 @@
+#pragma once
+#include "llaisys.h"
+
+#include <cstddef>
+
+namespace llaisys::ops::moore {
+void linear(std::byte *out, const std::byte *in, const std::byte *weight, const std::byte *bias,
+            llaisysDataType_t type, size_t batch, size_t out_features, size_t in_features);
+}
