@@ -25,7 +25,7 @@ target("llaisys-ops-nvidia")
 
     add_rules("cuda")
     set_policy("build.cuda.devlink", true)
-    add_links("cudart")
+    add_links("cudart", "cublas")
 
     if not is_plat("windows") then
         add_cxflags("-fPIC", "-Wno-unknown-pragmas")

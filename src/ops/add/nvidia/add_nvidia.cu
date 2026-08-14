@@ -28,7 +28,7 @@ template <>
 __global__ void addKernel<__half>(__half *c, const __half *a, const __half *b, size_t numel) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {
-        c[idx] = __float2half(__half2float(a[idx]) + __half2float(b[idx]));
+        c[idx] = __hadd(a[idx], b[idx]);
     }
 }
 
@@ -37,7 +37,7 @@ __global__ void addKernel<__nv_bfloat16>(__nv_bfloat16 *c, const __nv_bfloat16 *
                                          size_t numel) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numel) {
-        c[idx] = __float2bfloat16(__bfloat162float(a[idx]) + __bfloat162float(b[idx]));
+        c[idx] = __hadd(a[idx], b[idx]);
     }
 }
 
